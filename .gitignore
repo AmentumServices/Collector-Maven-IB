@@ -1,0 +1,11 @@
+# Ignore .vagrant
+.vagrant*
+
+# Ignore subdirectories
+*/
+!maven-ib/
+
+# Ignore Files
+*.tgz
+*.zip
+*.bundle

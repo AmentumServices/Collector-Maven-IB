@@ -1,0 +1,3 @@
+[submodule "maven-ib"]
+	path = maven-ib
+	url = https://repo1.dso.mil/dsop/opensource/maven/maven-openjdk-17
