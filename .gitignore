@@ -4,6 +4,7 @@
 # Ignore subdirectories
 */
 !maven-ib/
+!.github/**
 
 # Ignore Files
 *.tgz
