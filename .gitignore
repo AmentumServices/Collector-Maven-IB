@@ -2,7 +2,6 @@
 .vagrant*
 
 # Ignore subdirectories
-*/
 !maven-ib/
 !.github/**
 
