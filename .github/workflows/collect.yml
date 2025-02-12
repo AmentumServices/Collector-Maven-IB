@@ -10,20 +10,24 @@ on:
 
 jobs:
   Date:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       Date: ${{ steps.date.outputs.date }}
     steps:
       - name: Get current date
         id: DATE
         run: |
+          echo "Setting Date"
           echo "DATE=$(date '+%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
-          echo -e "\n$GITHUB_OUTPUT\n"
+          echo -e "\nWrote to file:\n$GITHUB_OUTPUT\n"
+          echo "Values:"
           cat $GITHUB_OUTPUT
 
   Skopeo:
     needs: [Date]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -35,38 +39,66 @@ jobs:
 
       - name: DSO Login
         run: |
-          skopeo login registry1.dso.mil -u ${{ secrets.REGISTRY_USER }} -p ${{ secrets.REGISTRY_TOKEN }}
+          skopeo login registry1.dso.mil \
+            -u ${{ secrets.REGISTRY_USER }} \
+            -p ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Run Skopeo Sync
         run: |
           skopeo sync \
-              --src yaml --dest dir ${{ vars.COLLECTOR }}.yml ${{ vars.COLLECTOR }}
+            --src yaml --dest dir \
+            ${{ vars.COLLECTOR }}.yml \
+            ${{ vars.COLLECTOR }}
 
       - name: Directory Contents
         run: |
-          echo "Directory Contents"
-          ls -lAhS *
-          echo -e "\nDirectory Size"
-          du -hd1 
+          echo -e "Directory Contents\n$(ls -lAhS *)"
+          echo -e "\n\nDirectory Size\n$(du -hd1)"
 
       - name: TARchive Skopeo Output
         run: |
           tar -cv -Ipigz --remove-files \
-            -f ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz ${{ vars.COLLECTOR }}
-          ls -Alh ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz
+            -f ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz ${{ vars.COLLECTOR }} \
+          | tee ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz.txt
+
+      - name: Generate Hash
+        run: |
+          sha256sum -b ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz | tee \
+            ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz.sha
+ 
+      - name: List files 
+        run: ls -Alht ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz*
 
       - name: Upload TARchive
         uses: actions/upload-artifact@v4
         with:
           name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz
           path: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz
+          if-no-files-found: error
+
+      - name: Upload TARchive SHA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz.sha
+          path: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz.sha
+          if-no-files-found: error
+
+      - name: Upload TARchive ToC
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz.txt
+          path: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.tgz.txt
+          if-no-files-found: error
 
   Code:
     needs: [Date]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: true
 
       - name: Setup Git
         run: |
@@ -80,17 +112,32 @@ jobs:
       - name: Bundle Repo1 code base for ${{ vars.COLLECTOR }}
         run: |
           git bundle create --progress ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.bundle --all
-          ls -Alht *
+          echo -e "\nDirectory Listing\n$(ls -Alht *)"
+
+      - name: Generate Hash
+        run: |
+          sha256sum -b ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.bundle | tee \
+            ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.bundle.sha
 
       - name: Upload bundle
         uses: actions/upload-artifact@v4
         with:
           name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.bundle
           path: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.bundle
+          if-no-files-found: error
+
+      - name: Upload bundle hash
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.bundle.sha
+          path: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.bundle.sha
+          if-no-files-found: error
 
   MakeISO:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [Date, Code, Skopeo]
+    env:
+      GH_TOKEN: ${{ github.token }}
     permissions:
       contents: write
       pull-requests: read
@@ -101,35 +148,59 @@ jobs:
       - name: Install mkisofs
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y mkisofs isomd5sum
+          sudo apt-get install -y mkisofs isomd5sum wget
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+          path: ISO
+
+      - name: Copy Markdowns to ISO
+        run: cp -v *.md ISO/
 
       - name: Show Artifacts
-        run: ls -Alh ${{ vars.COLLECTOR }}-*.*
+        run: ls -1sSh ISO/*
+
+      # Download latest binaries
+      # Download latest binaries
+      - name: Copy Markdowns to ${{ vars.COLLECTOR }} ISO
+        run: cp -v *.md ${{ vars.COLLECTOR }}/
+
+      - name: Show Artifacts in ISO
+        run: ls -Alht ${{ vars.COLLECTOR }}/*
 
       - name: Generate Artifact Hash File
         run: |
           sha256sum -b ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}* | tee \
-            ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.sha
-          
+            ISO/${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.sha
 
       - name: Upload Artifact Hash File
         uses: actions/upload-artifact@v4
         with:
           name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.sha
-          path: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.sha
+          path: ISO/${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.sha
+          if-no-files-found: error
+
+      - name: ISO Table of contents
+        run: |
+          tree ISO \
+            | tee ISO/${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso.txt
+
+      - name: Upload ISO ToC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso.txt
+          path: ISO/${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso.txt
+          if-no-files-found: error
 
       - name: Make ISO
         run: |
-          mkisofs -J -R -v -T -l \
+          mkisofs -r -v -l \
             -V '${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}' \
             -A '${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}' \
             -o ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso \
-            ${{ vars.COLLECTOR }}-*.* *.md
+            ISO
 
       - name: Implant MD5 sum into iso
         run: implantisomd5 ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso
@@ -138,10 +209,9 @@ jobs:
         run: |
           sha256sum -b ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso | tee \
             ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso.sha
-          cat ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso.sha
 
       - name: Show ISO & Hash
-        run: ls -Alh *.iso*
+        run: ls -sS1h *.iso*
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
@@ -155,9 +225,10 @@ jobs:
         with:
           name: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso.sha
           path: ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.iso.sha
+          if-no-files-found: error
 
   Release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [Date, MakeISO]
     permissions:
       contents: write
@@ -172,8 +243,9 @@ jobs:
           merge-multiple: true
 
       - name: Show Artifacts
-        run: ls -Alh ${{ vars.COLLECTOR }}-*.*
+        run: ls -Alht ${{ vars.COLLECTOR }}-*.*
 
+      # Create Release
       - name: Set up git
         run: |
           git config user.name "$(git log -n 1 --pretty=format:%an)"
@@ -184,7 +256,7 @@ jobs:
         id: tag_create
         with:
           tag: ${{ needs.Date.outputs.Date }}
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           tag_exists_error: false
           message: "Release for ${{ needs.Date.outputs.Date }} run"
 
@@ -199,7 +271,7 @@ jobs:
             ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}*.*
 
   Sharepoint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [Date, MakeISO]
     permissions:
       contents: write
@@ -211,10 +283,11 @@ jobs:
           merge-multiple: true
 
       - name: Show Artifacts
-        run: ls -Alh ${{ vars.COLLECTOR }}-*.*
+        run: ls -Alht ${{ vars.COLLECTOR }}-*.*
 
+      # Upload to Sharepoint
       - name: Send Files to Sharepoint
-        uses: amentumservices/sharepoint-file-upload-action@pappasjfed-patch-1
+        uses: amentumcms/sharepoint-file-upload-action@pappasjfed-patch-1
         with:
           file_path: "${{ vars.COLLECTOR }}-*.*"
           host_name: ${{ secrets.SHAREPOINT_HOST }}
