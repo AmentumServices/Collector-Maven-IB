@@ -159,16 +159,11 @@ jobs:
       - name: Copy Markdowns to ISO
         run: cp -v *.md ISO/
 
+      # Download latest binaries
+      # Download latest binaries
+
       - name: Show Artifacts
         run: ls -1sSh ISO/*
-
-      # Download latest binaries
-      # Download latest binaries
-      - name: Copy Markdowns to ${{ vars.COLLECTOR }} ISO
-        run: cp -v *.md ${{ vars.COLLECTOR }}/
-
-      - name: Show Artifacts in ISO
-        run: ls -Alht ${{ vars.COLLECTOR }}/*
 
       - name: Generate Artifact Hash File
         run: |
