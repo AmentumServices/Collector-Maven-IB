@@ -165,6 +165,7 @@ jobs:
 
       - name: Generate Artifact Hash File
         run: |
+          cd ISO
           sha256sum -b ${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}* | tee \
             ISO/${{ vars.COLLECTOR }}-${{ needs.Date.outputs.Date }}.sha
 
